@@ -47,39 +47,51 @@ if not os.environ.get("API_KEY"):
 @login_required
 def index():
     """Show portfolio of stocks"""
-    # Query database for user information
-    db.execute("DROP TABLE IF EXISTS temp_table")
-    db.execute("CREATE TABLE temp_table ('id' integer PRIMARY KEY AUTOINCREMENT NOT NULL, 'symbol' varchar(5) NOT NULL, 'name' varchar(100) NOT NULL, 'price' integer NOT NULL,'shares' integer NOT NULL,'total_value' integer NOT NULL)")
-    user_info = db.execute("SELECT name, symbol, total_shares FROM stocks JOIN current ON stocks.id = current.stock_id WHERE user_id = ?", session["user_id"])
-    total_stock_value = 0
-    for row in user_info:
-        symbol = row["symbol"]
-
-        name = row["name"]
-
-        current = lookup(row["symbol"])
-        price = int(current["price"])
-
-        shares = int(row["total_shares"])
-
-        total_value = shares * price
-
-        total_stock_value += total_value
-        db.execute("INSERT INTO temp_table (symbol, name, price, shares, total_value) VALUES (?, ?, ?, ?, ?)", symbol, name, price, shares, total_value)
+    # Query db for user's current holdings
+    portfolio = db.execute("SELECT name, symbol, total_shares AS shares FROM stocks JOIN current ON stocks.id = current.stock_id WHERE user_id = ?", session["user_id"])
     
-    portfolio = db.execute("SELECT * FROM temp_table")    
-    cash_query = db.execute("SELECT cash FROM users WHERE id = ?", session["user_id"])
-    cash = int(cash_query[0]["cash"])
-    total_equity = cash + total_stock_value
-
-    equity = {}
-    equity["cash"] = cash
-    equity["total_stock_value"] = total_stock_value
-    equity["total_equity"] = total_equity
-
+    # Update each stock in portfolio with current price & total value of each stock holding and calculate total value of all stocks
+    total_stock_value = 0
+    for row in portfolio:
+        price = lookup(row["symbol"])["price"]
+        total_value = price * row["shares"]
+        row.update({"price": price, "total_value": total_value})
+        total_stock_value += total_value
+        
+     # Query user table for cash balance   
+    cash = db.execute("SELECT cash FROM users WHERE id = ?", session["user_id"])[0]["cash"]
+    
+    # Create dict with user equity data
+    equity = {"cash": cash, "total_stock_value": total_stock_value, "total_equity": total_stock_value + cash}
+   
+    # Display portfolio * equity data on homepage
     return render_template("index.html", portfolio = portfolio, equity = equity)
 
+@app.route("/add", methods=["GET", "POST"])
+@login_required
+def add():
+    """Add cash"""
+    # User reached route via post method
+    if request.method == "POST":
+        deposit = request.form.get("deposit")
+        deposit = int(deposit)
+        
+        # Error message if blank input
+        if not deposit:
+            return apology("Please enter an amount to deposit", code=400)
+        
+        # calculate new balance and update user data
+        balance = db.execute("SELECT cash FROM users WHERE id = ?", session["user_id"])
+        new_balance = balance[0]["cash"] + deposit
+        db.execute("UPDATE users SET cash = ? WHERE id = ?", new_balance, session["user_id"])
+        
+    # Return to index.html
+        return redirect("/")
 
+    # User reached route via GET (as by clicking a link or via redirect)
+    else:
+        return render_template("add.html")
+        
 @app.route("/buy", methods=["GET", "POST"])
 @login_required
 def buy():
@@ -88,8 +100,7 @@ def buy():
     if request.method == "POST":
         #Assign symbol and shares(as integer) to variables
         symbol = request.form.get("symbol")
-        shares = request.form.get("shares")
-        shares = int(shares)
+        shares = int(request.form.get("shares"))
 
         # Error message if no input in symbol field
         if not symbol:
@@ -98,6 +109,9 @@ def buy():
         # Error message if share value less than 1
         if shares < 1:
             return apology("Please enter at least one share", code=400)
+            
+        if isinstance(shares, int) == False:
+            return apology("Please enter at least one share using whole numbers", code=400)
 
         # Use lookup function to find current price and return error message if symbol is not valid
         quote = lookup(symbol)
@@ -140,7 +154,7 @@ def buy():
         db.execute("UPDATE users SET cash = ? WHERE id = ?", new_balance, session["user_id"])
 
         # Return to index.html
-        return render_template("index.html")
+        return redirect("/")
 
     # User reached route via GET (as by clicking a link or via redirect)
     else:
@@ -150,7 +164,9 @@ def buy():
 @login_required
 def history():
     """Show history of transactions"""
-    return apology("TODO")
+    history = db.execute("SELECT datetime, action, symbol, price, shares FROM history JOIN stocks ON stocks.id = history.stock_id WHERE user_id = ?", session["user_id"])
+    
+    return render_template("history.html", history = history)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -206,10 +222,17 @@ def quote():
     """Get stock quote."""
     # User reached route via POST (as by submitting a form via POST)
     if request.method == "POST":
-
-        # Look up stock price and render on quoted.html
         symbol = request.form.get("symbol")
+        # Error message if no input in symbol field
+        if not symbol:
+            return apology("Please enter a valid stock symbol", code=400)
+
+        # Use lookup function to find current price and return error message if symbol is not valid
         quote = lookup(symbol)
+        if quote == None:
+            return apology("Please enter a valid stock symbol", code=400)
+            
+        # Display quote
         return render_template("quoted.html", quote=quote)
 
    # User reached route via GET (as by clicking a link or via redirect)
@@ -228,10 +251,10 @@ def register():
             return apology("Please enter a username", code=400)
 
         # Query database to see if user name exists
-        usernames = db.execute("SELECT username FROM users")
+        user_check = db.execute('SELECT username FROM users WHERE username = ?', username)
 
         #Error message if user name exists
-        if username in usernames:
+        if user_check:
             return apology("Username already exists", code=400)
 
         # Return error message if empty password field
@@ -260,7 +283,66 @@ def register():
 @login_required
 def sell():
     """Sell shares of stock"""
-    return apology("TODO")
+    # User reached route via post method
+    if request.method == "POST":
+
+        #Assign symbol and shares(as integer) to variables
+        symbol = request.form.get("symbol")
+        shares = request.form.get("shares")
+        shares = int(shares)
+
+        # Error message if no input in symbol field
+        if not symbol:
+            return apology("Please enter a valid stock symbol", code=400)
+
+        # Error message if share value less than 1
+        if shares < 1:
+            return apology("Please enter at least one share", code=400)
+
+        # Query current table to confirm user owns enough shares to sell and return error message if not
+        currently_held = db.execute("SELECT total_shares FROM current WHERE user_id = ? AND stock_id IN (SELECT id FROM stocks WHERE symbol = ?)", session["user_id"], symbol)
+        if not currently_held or int(currently_held[0]["total_shares"]) < shares:
+            return apology("You do not have enough shares of this stock to complete transaction", code=400)
+
+        # Assign stock price and stock price * shares requested to variables
+        price = lookup(symbol)["price"]
+        sale_price = price * shares
+
+        # Assign stock id from stocks table to variable
+        stockid = db.execute("SELECT id FROM stocks WHERE symbol = ?", symbol)
+
+        # Add this sale to history table
+        db.execute("INSERT INTO history(user_id, action, stock_id, price, shares) VALUES(?, ?, ?, ?, ?)", session["user_id"], "sale", stockid[0]["id"], price, shares)
+
+        # Update current table to reflect number of stocks owned after purchase
+        # Query current table to find shares currently held
+        current_shares = db.execute("SELECT total_shares FROM current WHERE user_id = ? AND stock_id = ?", session["user_id"], stockid[0]["id"])
+
+        # Calculate update shares
+        updated_shares = int(current_shares[0]["total_shares"]) - shares
+
+        # If user still holds shares, update table
+        if updated_shares > 0:
+            db.execute("UPDATE current SET total_shares = ? WHERE user_id = ? and stock_id = ?", updated_shares, session["user_id"], stockid[0]["id"])
+
+        # If all shares are sold, delete row
+        else:
+            db.execute("DELETE FROM current WHERE user_id = ? and stock_id = ?", session["user_id"], stockid[0]["id"])
+
+        # Update user cash balance
+        balance = db.execute("SELECT cash FROM users WHERE id = ?", session["user_id"])
+        new_balance = balance[0]["cash"] + sale_price
+        db.execute("UPDATE users SET cash = ? WHERE id = ?", new_balance, session["user_id"])
+
+        # Return to index.html
+        return redirect("/")
+
+    # User reached route via GET (as by clicking a link or via redirect)
+    else:
+        # Query db for currently held stocks and use to create select menu options in sell page form
+        current_stocks = db.execute("SELECT symbol FROM stocks WHERE id IN (SELECT stock_id FROM current WHERE user_id = ?)", session["user_id"])
+        return render_template("sell.html", current_stocks = current_stocks)
+
 
 
 def errorhandler(e):

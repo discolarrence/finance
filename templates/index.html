@@ -23,11 +23,11 @@
                     <tbody>
                         {% for row in portfolio %}
                             <tr>
-                                <td>{{ row.symbol }}</td>
-                                <td>{{ row.name }}</td>
-                                <td>{{  row.price | usd }}</td>
+                                <td>{{  row.symbol  }}</td>
+                                <td>{{  row.name  }}</td>
+                                <td>{{  row.price | usd  }}</td>
                                 <td>{{  row.shares  }}</td>
-                                <td>{{  row.total_value | usd }}</td>
+                                <td>{{  row.total_value | usd  }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -45,9 +45,9 @@
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{{  equity.cash | usd }}</td>
-                            <td>{{  equity.total_stock_value | usd }}</td>
-                            <td>{{  equity.total_equity | usd }}</td>
+                            <td>{{  equity.cash | usd  }}</td>
+                            <td>{{  equity.total_stock_value | usd  }}</td>
+                            <td>{{  equity.total_equity | usd  }}</td>
                         </tr>
                     </tbody>
                 </table>
